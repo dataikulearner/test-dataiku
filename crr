@@ -1,0 +1,48 @@
+Dear CRR Team,
+
+Thank you for providing the data during our workshops. After thorough analysis, we would like to share an important technical clarification regarding the DETECT platform and your requirements.
+
+
+**The Core Difference**
+
+DETECT was designed to answer: "Is this value abnormal?"
+Your requirement is to answer: "What value should be filled in?"
+
+These are fundamentally different problem types:
+
+• DETECT (Anomaly Detection): Compares an existing value against historical patterns to flag outliers. It requires data WITH values to analyze.
+
+• CRR Requirement (Value Prediction): Predicts what a missing value should be based on record characteristics. Your LGD Model field is empty — there is no value to compare.
+
+
+**Why DETECT's Algorithm Cannot Be Used Directly**
+
+The DETECT algorithm (detect_core) works by:
+1. Taking historical values (e.g., 12 months of ECL data)
+2. Calculating an expected value from that history
+3. Comparing the current value against the expected
+4. Flagging if the deviation exceeds a threshold
+
+For your case:
+• There is no historical LGD Model data per record
+• The current value is empty (nothing to compare)
+• You need prediction, not comparison
+
+
+**What This Means**
+
+We cannot simply "plug in" your data into DETECT. However, the DETECT infrastructure (DSS platform, pipelines, dashboards) can be leveraged to build a new solution tailored to your needs.
+
+Before we propose an approach, we would like to understand:
+
+1. Why is the LGD Model field empty? (Source system issue? Missing mapping rules?)
+2. Is there existing documentation on which LGD Model applies to each PMA?
+3. Can you provide more correction examples beyond the 21 from Q3-Q4?
+
+These answers will help us determine the most effective solution — whether rule-based, ML-based, or a hybrid approach.
+
+Would you be available for a call to discuss?
+
+Best regards,
+
+DETECT Team (PROMETHEE)
