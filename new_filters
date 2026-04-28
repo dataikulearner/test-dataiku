@@ -1,0 +1,246 @@
+# DETECT CCIRC — Scope Filter Architecture
+
+**Version:** 1.0  
+**Date:** April 2026  
+**Author:** DETECT Team  
+**Status:** For Review
+
+---
+
+## 1. Overview
+
+This document describes the architecture for implementing scope-based filtering in the DETECT CCIRC dashboard, based on André/Pierre's requirements.
+
+**Requirements Summary:**
+- "Filters needed to create different scopes of analysis" — 4 pre-defined scopes (US, Fortis, BCeF, Japan)
+- "Be capable to adapt any time as users" — Users can switch scopes instantly
+
+---
+
+## 2. Data Flow Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                 INPUTS                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+     ┌──────────────────────────┐          ┌──────────────────────────┐
+     │     Input DataFrame      │          │  config/ccirc_params.json │
+     │                          │          │                          │
+     │  • accounting_site_code  │          │  {                       │
+     │  • pmas_code_post_acc    │          │    "scopes": {           │
+     │  • lb_site_risque        │          │      "us": {...}         │
+     │  • ...                   │          │      "fortis": {...}     │
+     │                          │          │      "bcef": {...}       │
+     │                          │          │      "japan": {...}      │
+     └────────────┬─────────────┘          │    }                     │
+                  │                        │  }                       │
+                  │                        └─────────────┬────────────┘
+                  │                                      │
+                  └──────────────────┬───────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          PROCESSING                                         │
+│                                                                             │
+│   lib/scope_utils.py                                                        │
+│   ──────────────────                                                        │
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │  compute_all_scopes(df, scope_definitions)                          │   │
+│   │                                                                     │   │
+│   │  For each scope in definitions:                                     │   │
+│   │      └── compute_scope(df, scope_id, filters)                       │   │
+│   │              │                                                      │   │
+│   │              ├── Build condition for each filter                    │   │
+│   │              ├── Operators: IN | EQUALS | NOT_IN                    │   │
+│   │              ├── AND all conditions together                        │   │
+│   │              └── Return boolean Series                              │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                OUTPUT                                       │
+│                                                                             │
+│   DataFrame with additional boolean columns:                                │
+│                                                                             │
+│   ┌────────────┬──────────┬──────────────┬────────────┬─────────────┐      │
+│   │ (original) │ scope_us │ scope_fortis │ scope_bcef │ scope_japan │      │
+│   ├────────────┼──────────┼──────────────┼────────────┼─────────────┤      │
+│   │ ...        │ True     │ False        │ True       │ False       │      │
+│   │ ...        │ False    │ True         │ False      │ False       │      │
+│   │ ...        │ False    │ False        │ False      │ True        │      │
+│   └────────────┴──────────┴──────────────┴────────────┴─────────────┘      │
+│                                                                             │
+│   ✓ Boolean columns allow segment to belong to multiple scopes              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. File Structure
+
+```
+detect_scope/
+│
+├── config/
+│   └── ccirc_params.json      # Scope definitions
+│
+├── lib/
+│   └── scope_utils.py         # Core processing functions
+│
+└── tests/
+    └── test_scope_utils.py    # Unit tests (14 tests)
+```
+
+---
+
+## 4. Scope Definitions
+
+| Scope | Label | Filter Logic |
+|-------|-------|--------------|
+| `us` | 🇺🇸 US | `accounting_site_code_post_acc IN (12309, 40043, 11939, ...)` |
+| `fortis` | 🇧🇪 Fortis | `accounting_site_code_post_acc IN (10054, 10056, 10064, ...)` |
+| `bcef` | 💳 BCeF | `pmas_code_post_acc = 'PMA_03' AND (lb_site_risque NOT IN ('BNPP Factor France') OR IS NULL)` |
+| `japan` | 🇯🇵 Japan | `accounting_site_code_post_acc IN (30448, 48019) AND pmas_code_post_acc = 'PMA_05'` |
+
+---
+
+## 5. Supported Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `IN` | Value in list | `{"operator": "IN", "values": ["A", "B"]}` |
+| `EQUALS` | Exact match | `{"operator": "EQUALS", "value": "PMA_03"}` |
+| `NOT_IN` | Not in list | `{"operator": "NOT_IN", "values": ["X"], "allow_null": true}` |
+
+---
+
+## 6. Core Functions
+
+### `compute_all_scopes(df, scope_definitions) → DataFrame`
+
+Main entry point. Loops through all scope definitions and adds boolean columns.
+
+```python
+df = compute_all_scopes(df, params["scopes"])
+# Result: df with scope_us, scope_fortis, scope_bcef, scope_japan columns
+```
+
+### `compute_scope(df, scope_id, filters) → Series`
+
+Computes a single scope. Builds AND condition from all filters.
+
+### `get_scope_stats(df, scope_ids) → Dict`
+
+Returns count statistics per scope.
+
+```python
+stats = get_scope_stats(df, ["us", "fortis", "bcef", "japan"])
+# Result: {"total": 1000, "us": 150, "fortis": 200, "bcef": 80, "japan": 50, "multi_scope": 25}
+```
+
+---
+
+## 7. Usage Example
+
+```python
+import json
+import pandas as pd
+from lib.scope_utils import compute_all_scopes, get_scope_stats
+
+# 1. Load config
+with open("config/ccirc_params.json") as f:
+    params = json.load(f)
+
+# 2. Your input data
+df = pd.DataFrame({
+    "segment_id": ["S1", "S2", "S3"],
+    "accounting_site_code_post_acc": ["12309", "10054", "30448"],
+    "pmas_code_post_acc": ["PMA_01", "PMA_02", "PMA_05"],
+    "lb_site_risque_apres_accr": ["Other", "Other", "Other"]
+})
+
+# 3. Compute scopes
+df = compute_all_scopes(df, params["scopes"])
+
+# 4. Result
+print(df[["segment_id", "scope_us", "scope_fortis", "scope_japan"]])
+#   segment_id  scope_us  scope_fortis  scope_japan
+# 0         S1      True         False        False
+# 1         S2     False          True        False
+# 2         S3     False         False         True
+```
+
+---
+
+## 8. Test Coverage
+
+| Test Category | Count | Description |
+|---------------|-------|-------------|
+| US Scope | 2 | Basic IN operator |
+| Fortis Scope | 1 | Basic IN operator |
+| BCeF Scope | 3 | NOT_IN + allow_null handling |
+| Japan Scope | 2 | Combined AND filters |
+| Multi-Scope | 2 | Segment in multiple scopes |
+| Statistics | 1 | get_scope_stats function |
+| Edge Cases | 3 | Empty df, all columns created, immutability |
+| **Total** | **14** | ✅ All passed |
+
+**Run tests:**
+```bash
+python tests/test_scope_utils.py
+```
+
+---
+
+## 9. Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Boolean columns** | A segment can belong to multiple scopes (e.g., both US and BCeF) |
+| **Config-driven** | Add new scope by editing JSON, no code change required |
+| **Simple operators** | IN, EQUALS, NOT_IN cover all current requirements |
+| **Immutable input** | `compute_all_scopes` returns a copy, original df unchanged |
+
+---
+
+## 10. Adding a New Scope
+
+1. Edit `config/ccirc_params.json`:
+
+```json
+{
+  "scopes": {
+    "new_scope": {
+      "label": "New Scope",
+      "filters": {
+        "column_name": {
+          "operator": "IN",
+          "values": ["value1", "value2"]
+        }
+      }
+    }
+  }
+}
+```
+
+2. Run pipeline — new `scope_new_scope` column will be computed automatically.
+
+---
+
+## 11. Open Questions
+
+| Column | Status | Question |
+|--------|--------|----------|
+| `business_country` | ⚠️ Not used | Future scope or standalone filter? |
+| `cd_uds_pmas_metier_ap_acc` | ⚠️ Not used | Future scope or standalone filter? |
+
+→ **Action:** Clarify with André/Pierre
+
+---
+
+*Document generated: April 2026*
