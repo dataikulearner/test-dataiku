@@ -1,0 +1,51 @@
+{
+  "scopes": {
+    "us": {
+      "label": "US",
+      "filters": {
+        "accounting_site_code_post_acc": {
+          "operator": "IN",
+          "values": ["12309", "40043", "11939", "56185", "11967", "10086",
+                    "40041", "45846", "45567", "11969", "40040", "40042",
+                    "41230", "41229", "40178", "56187"]
+        }
+      }
+    },
+    "fortis": {
+      "label": "Fortis",
+      "filters": {
+        "accounting_site_code_post_acc": {
+          "operator": "IN",
+          "values": ["10054", "10056", "10064", "10276", "10846", "12332"]
+        }
+      }
+    },
+    "bcef": {
+      "label": "BCeF",
+      "filters": {
+        "pmas_code_post_acc": {
+          "operator": "EQUALS",
+          "value": "PMA_03"
+        },
+        "lb_site_risque_apres_accr": {
+          "operator": "NOT_IN",
+          "values": ["BNPP Factor France"],
+          "allow_null": true
+        }
+      }
+    },
+    "japan": {
+      "label": "Japan",
+      "filters": {
+        "accounting_site_code_post_acc": {
+          "operator": "IN",
+          "values": ["30448", "48019"]
+        },
+        "pmas_code_post_acc": {
+          "operator": "EQUALS",
+          "value": "PMA_05"
+        }
+      }
+    }
+  }
+}
