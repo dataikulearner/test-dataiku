@@ -1,0 +1,245 @@
+# DETECT CCIRC - Scope Layer
+
+## Overview
+
+Scope Layer computes boolean scope columns (`scope_us`, `scope_fortis`, `scope_bcef`, `scope_japan`) based on source columns from the main CCIRC pipeline.
+
+**Performance**: 30 seconds - 2 minutes (vs 2-4 hours for full pipeline re-run)
+
+-----
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  CCIRC PIPELINE (run once to add source columns)                            │
+│                                                                             │
+│  Pre-processing ──► Detection ──► Post-processing ──► SP_display_seg       │
+│       │                                                     │               │
+│       └── Add 5 source columns                              │               │
+│           • accounting_site_code_post_acc                   │               │
+│           • pmas_code_post_acc                              │               │
+│           • lb_site_risque_apres_accr                       │               │
+│           • cd_uds_pmas_metier_ap_acc                       │               │
+│           • business_country                                │               │
+│                                                             │               │
+└─────────────────────────────────────────────────────────────┼───────────────┘
+                                                              │
+                                                              ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCOPE LAYER (run on each scope change - fast!)                             │
+│                                                                             │
+│  SP_display_seg ──► compute_scope_columns ──► SP_display_seg_scoped        │
+│                            │                                                │
+│                            │ Reads: ccirc_params.json["scopes"]            │
+│                            │                                                │
+│                            │ Computes:                                      │
+│                            │   scope_us = acct_site IN (12309, 40043, ...) │
+│                            │   scope_fortis = acct_site IN (10054, ...)    │
+│                            │   scope_bcef = pmas='PMA_03' AND NOT IN ...   │
+│                            │   scope_japan = acct_site IN (...) AND ...    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+-----
+
+## Package Structure
+
+```
+scope_layer/
+├── README.md                          # This file
+├── config/
+│   └── ccirc_params.json              # Scope definitions
+├── lib/
+│   └── scope_utils.py                 # Core functions (reusable)
+├── recipes/
+│   └── compute_scope_columns.py       # DSS Recipe
+└── tests/
+    └── test_scope_utils.py            # Unit tests (16 tests)
+```
+
+-----
+
+## Installation in DSS
+
+### Step 1: Upload Config
+
+1. Create Managed Folder: `ccirc_config`
+1. Upload `config/ccirc_params.json` to this folder
+
+### Step 2: Create Recipe
+
+1. Create Python Recipe
+1. Input: `SP_display_seg`
+1. Output: `SP_display_seg_scoped`
+1. Paste code from `recipes/compute_scope_columns.py`
+
+### Step 3: Add to Scenario
+
+1. Open CCIRC scenario
+1. Add step: Run recipe `compute_scope_columns`
+1. Position: After post_processing
+
+-----
+
+## Scope Definitions
+
+|Scope   |Filter Logic                                                                 |
+|--------|-----------------------------------------------------------------------------|
+|`us`    |`accounting_site_code_post_acc IN (12309, 40043, ...)`                       |
+|`fortis`|`accounting_site_code_post_acc IN (10054, 10056, ...)`                       |
+|`bcef`  |`pmas_code = 'PMA_03' AND (lb_site NOT IN ('BNPP Factor France') OR IS NULL)`|
+|`japan` |`accounting_site_code IN (30448, 48019) AND pmas_code = 'PMA_05'`            |
+
+-----
+
+## Updating Scopes
+
+### Add New Scope Values
+
+Edit `ccirc_params.json`:
+
+```json
+{
+  "scopes": {
+    "us": {
+      "filters": {
+        "accounting_site_code_post_acc": {
+          "operator": "IN",
+          "values": ["12309", "40043", "NEW_CODE"]  ← Add here
+        }
+      }
+    }
+  }
+}
+```
+
+Re-run Scope Layer recipe (30 seconds).
+
+### Add New Scope
+
+```json
+{
+  "scopes": {
+    "new_scope": {
+      "label": "New Scope",
+      "filters": {
+        "column_name": {
+          "operator": "IN",
+          "values": ["value1", "value2"]
+        }
+      }
+    }
+  }
+}
+```
+
+-----
+
+## Supported Operators
+
+|Operator    |Description  |Example                                                      |
+|------------|-------------|-------------------------------------------------------------|
+|`IN`        |Value in list|`{"operator": "IN", "values": ["A", "B"]}`                   |
+|`EQUALS`    |Exact match  |`{"operator": "EQUALS", "value": "X"}`                       |
+|`NOT_IN`    |Not in list  |`{"operator": "NOT_IN", "values": ["Y"], "allow_null": true}`|
+|`NOT_EQUALS`|Not equal    |`{"operator": "NOT_EQUALS", "value": "Z"}`                   |
+
+### `allow_null` Option
+
+For `NOT_IN` and `NOT_EQUALS`:
+
+- `allow_null: true` → NULL values are INCLUDED (return True)
+- `allow_null: false` → NULL values are EXCLUDED (return False)
+
+**BCeF example**: `"allow_null": true` because NULL lb_site_risque should be included.
+
+-----
+
+## Testing
+
+```bash
+cd scope_layer
+python tests/test_scope_utils.py
+```
+
+Expected: `16 tests, 0 failures`
+
+-----
+
+## Output Columns
+
+|Column        |Type   |Description                            |
+|--------------|-------|---------------------------------------|
+|`scope_us`    |Boolean|True if segment belongs to US scope    |
+|`scope_fortis`|Boolean|True if segment belongs to Fortis scope|
+|`scope_bcef`  |Boolean|True if segment belongs to BCeF scope  |
+|`scope_japan` |Boolean|True if segment belongs to Japan scope |
+
+**Note**: A segment can belong to multiple scopes (e.g., both `scope_us` and `scope_bcef` can be True).
+
+-----
+
+## Tableau Integration
+
+Use scope columns as filters:
+
+```sql
+-- Single scope
+SELECT * FROM SP_display_seg_scoped WHERE scope_us = true
+
+-- Multiple scopes
+SELECT * FROM SP_display_seg_scoped WHERE scope_us = true OR scope_bcef = true
+```
+
+Or use Tableau parameter + calculated field:
+
+```
+// Calculated field: Scope Filter
+CASE [Scope Parameter]
+  WHEN "All" THEN TRUE
+  WHEN "US" THEN [scope_us]
+  WHEN "Fortis" THEN [scope_fortis]
+  WHEN "BCeF" THEN [scope_bcef]
+  WHEN "Japan" THEN [scope_japan]
+END
+```
+
+-----
+
+## Troubleshooting
+
+### Error: “Missing source columns”
+
+**Cause**: Pre-processing hasn’t added scope source columns yet.
+
+**Solution**:
+
+1. Deploy updated `pre_processing_ccirc.py` (with SCOPE_SOURCE_COLUMNS)
+1. Re-run full CCIRC pipeline once
+1. Then re-run Scope Layer
+
+### Error: “Config file not found”
+
+**Cause**: `ccirc_params.json` not in Managed Folder.
+
+**Solution**:
+
+1. Create Managed Folder `ccirc_config`
+1. Upload `config/ccirc_params.json`
+
+-----
+
+## Version History
+
+|Version|Date      |Changes                                            |
+|-------|----------|---------------------------------------------------|
+|1.0    |April 2026|Initial release with US, Fortis, BCeF, Japan scopes|
+
+-----
+
+## Contact
+
+- **Team**: DETECT Team
+- **Requirements**: André Filipe COUTO, Pierre
