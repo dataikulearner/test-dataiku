@@ -1,0 +1,30 @@
+Bonjour,
+Suite à votre demande concernant la faisabilité d’un PoC CRR au sein de DETECT, voici mon analyse complète.
+1. Approche initiale : Détecter les LGD Model erronés
+Cette approche n’est pas réalisable avec DETECT :
+• Le champ LGD est catégoriel (codes modèles) → impossible de calculer une déviation
+• Le champ est vide à 100% → rien à détecter
+2. Approche alternative : Détecter les anomalies sur MT_EAD_IRBA
+J’ai analysé une approche alternative utilisant MT_EAD_IRBA (numérique) avec les 21 axes disponibles (PMA, Corep, Site…).
+Ce qui est compatible :
+• MT_EAD_IRBA est numérique → on peut calculer médiane et déviation
+• 262 640 lignes avec valeurs renseignées
+• 21 axes pour segmenter les données
+Ce qui manque :
+• Pas de série temporelle (uniquement Q4 2025)
+• DETECT compare une valeur actuelle à son historique (T-1, T-2…) → impossible sans historique
+3. Adaptation possible : Peer Comparison
+Sans historique, on pourrait adapter l’approche :
+• Au lieu de comparer un record à son propre historique
+• Comparer un record aux autres records du même segment (même PMA, même Corep…)
+• Flaguer les outliers par rapport à la médiane du segment
+Cette approche est techniquement faisable, mais ce n’est plus l’algorithme DETECT original.
+4. Limitation importante
+Détecter une anomalie sur EAD ≠ Détecter un LGD erroné.
+L’EAD est indépendant du LGD (c’est le LGD qui affecte le RWA, pas l’EAD). Cette approche serait un proxy indirect : flagger les records avec EAD anormal pour revue manuelle du LGD.
+5. Questions à clarifier avec CRR
+Avant de lancer un PoC, je recommande de clarifier avec CRR :
+• Ont-ils des données historiques (Q1, Q2, Q3) ? Si oui, DETECT original serait possible.
+• Acceptent-ils une approche indirecte (outliers EAD → revue LGD) ?
+• Quel seuil de déviation serait acceptable ?
+Résumé
